@@ -227,9 +227,164 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
   }, [])
   const [honeypot, setHoneypot] = useState("")
 
+  // Two-step mode (NEXT_PUBLIC_TWO_STEP=true). Phase 1 = address + name/phone/email, NO
+  // disqualifiers, posts source:"basic-capture" immediately (no pixel). Phase 2 = the existing
+  // qualifying steps + DQ; the final submit fires the Meta Lead once and posts
+  // source:"qualifying-details". Flag OFF = the original single-flow behaviour, unchanged.
+  const twoStep = process.env.NEXT_PUBLIC_TWO_STEP === 'true'
+  const TWO_STEP_KEY = 'twoStepLead'
+  const [phase, setPhase] = useState<1 | 2>(1)
+  // Persist phase-1 capture so a refresh mid-survey doesn't lose it (two-step only).
+  useEffect(() => {
+    if (!twoStep) return
+    try {
+      const saved = localStorage.getItem(TWO_STEP_KEY)
+      if (saved) {
+        const d = JSON.parse(saved)
+        if (d.fields) setSurveyData((prev) => ({ ...prev, ...d.fields }))
+        if (d.basicPosted) { setPhase(2); setAddressVerified(true); setStep(2) }
+      } else if (initialAddress) {
+        // hero prefilled the address: go straight to the phase-1 contact step
+        setAddressVerified(true); setStep(9)
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const totalSteps = 9
 
+  // Final submit (fires the Meta Lead pixel + posts the full lead). Called by the single-flow
+  // step-9 path (source = configured LEAD_SOURCE) and, in two-step mode, after the last
+  // qualifying step (source = "qualifying-details"). Behaviour is identical to the original
+  // step-9 block; only `source` varies.
+  const runFinalSubmit = async (source: string) => {
+    if (isSubmitting) return
+    const timeSpent = Date.now() - formStartTime.current
+    if (timeSpent < 3000) { setIsSubmitted(true); return }
+    if (honeypot) { setIsSubmitted(true); return }
+
+    setIsSubmitting(true)
+
+    try {
+      const score = calculateLeadScore(surveyData)
+      const quality = leadQuality(score)
+      // Excellent / move-in-ready condition is NOT a Meta-qualifying lead:
+      // capture it for the client, but never fire the real "Lead" pixel event.
+      const isExcellentCondition = surveyData.condition === 'excellent'
+      const qualified = isQualifiedForMeta(surveyData) && (excellentPass || !isExcellentCondition)
+      const dqReason = qualified ? null : disqualifyReasonFor(surveyData)
+      const eventId = `lead-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+      const payload = {
+        ...surveyData,
+        ...trackingRef.current,
+        source,
+        submittedAt: new Date().toISOString(),
+        qualified,
+        lead_score: score,
+        lead_quality: quality,
+        disqualify_reason: dqReason,
+        meta_event_id: eventId,
+        meta_event_name: qualified ? 'Lead' : 'LeadLowIntent',
+        meta_value: qualified ? score * 25 : 0,
+      }
+      // Fire weighted Meta Pixel event (browser-side; CAPI is a separate later phase)
+      if (typeof window !== 'undefined' && (window as { fbq?: (...args: unknown[]) => void }).fbq) {
+        const fbq = (window as { fbq: (...args: unknown[]) => void }).fbq
+        if (qualified) {
+          fbq('track', 'Lead', {
+            value: score * 25, currency: 'USD',
+            content_name: `${brand.companyName} Survey`, content_category: 'real_estate',
+            lead_score: score, lead_quality: quality,
+          }, { eventID: eventId })
+        } else {
+          fbq('trackCustom', 'LeadLowIntent', {
+            content_name: `${brand.companyName} Survey`, content_category: 'real_estate',
+            disqualify_reason: dqReason, lead_score: score,
+          }, { eventID: eventId })
+        }
+      }
+      const res = await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        console.error('Submit failed:', res.status, await res.text())
+      }
+    } catch (e) {
+      console.error('Submit error:', e)
+    }
+
+    // Persist lead data for thank-you page book offer
+    try {
+      sessionStorage.setItem('leadData', JSON.stringify({
+        firstName: surveyData.firstName,
+        lastName: surveyData.lastName,
+        email: surveyData.email,
+        phone: surveyData.phone,
+        address: surveyData.address,
+        city: surveyData.city,
+        state: surveyData.state,
+        zip: surveyData.zip,
+      }))
+      // Bridge the property condition to the thank-you page so its Lead
+      // pixel fire can suppress excellent / move-in-ready leads.
+      sessionStorage.setItem('lead_condition', surveyData.condition)
+    } catch {}
+    try { localStorage.removeItem(TWO_STEP_KEY) } catch {}
+
+    window.location.href = '/thank-you'
+  }
+
+  // Two-step phase 1: capture name/phone/email/address and post source:"basic-capture"
+  // immediately (NO pixel, NO disqualifiers), then move to the qualifying phase.
+  const submitBasic = async () => {
+    if (isSubmitting) return
+    const errors: {[key: string]: string} = {}
+    const firstNameCheck = validateName(surveyData.firstName)
+    if (!firstNameCheck.valid) errors.firstName = firstNameCheck.msg
+    const lastNameCheck = validateName(surveyData.lastName)
+    if (!lastNameCheck.valid) errors.lastName = lastNameCheck.msg
+    const emailCheck = validateEmail(surveyData.email)
+    if (!emailCheck.valid) errors.email = emailCheck.msg
+    const phoneCheck = validatePhone(surveyData.phone)
+    if (!phoneCheck.valid) errors.phone = phoneCheck.msg
+    if (Object.keys(errors).length > 0) { setValidationErrors(errors); return }
+    if (honeypot) { setIsSubmitted(true); return }
+
+    setIsSubmitting(true)
+    try {
+      const payload = {
+        ...surveyData,
+        ...trackingRef.current,
+        source: 'basic-capture',
+        submittedAt: new Date().toISOString(),
+      }
+      await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    } catch (e) {
+      console.error('Basic capture error:', e)
+    }
+    try {
+      localStorage.setItem(TWO_STEP_KEY, JSON.stringify({ basicPosted: true, fields: {
+        address: surveyData.address, city: surveyData.city, state: surveyData.state, zip: surveyData.zip,
+        firstName: surveyData.firstName, lastName: surveyData.lastName, email: surveyData.email, phone: surveyData.phone,
+      }}))
+    } catch {}
+    setIsSubmitting(false)
+    setPhase(2)
+    setStep(2)
+  }
+
   const handleNext = async () => {
+    // Two-step: address step routes to the contact step; phase-1 contact posts basic-capture;
+    // the last qualifying step submits the final lead.
+    if (twoStep && phase === 1 && step === 1 && addressVerified) { setStep(9); return }
+    if (twoStep && phase === 1 && step === 9) { await submitBasic(); return }
+    if (twoStep && phase === 2 && step === 8) { await runFinalSubmit('qualifying-details'); return }
     if (step === 9) {
       const errors: {[key: string]: string} = {}
       const firstNameCheck = validateName(surveyData.firstName)
@@ -246,80 +401,7 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
         return
       }
 
-      const timeSpent = Date.now() - formStartTime.current
-      if (timeSpent < 3000) { setIsSubmitted(true); return }
-      if (honeypot) { setIsSubmitted(true); return }
-
-      setIsSubmitting(true)
-
-      try {
-        const score = calculateLeadScore(surveyData)
-        const quality = leadQuality(score)
-        // Excellent / move-in-ready condition is NOT a Meta-qualifying lead:
-        // capture it for the client, but never fire the real "Lead" pixel event.
-        const isExcellentCondition = surveyData.condition === 'excellent'
-        const qualified = isQualifiedForMeta(surveyData) && (excellentPass || !isExcellentCondition)
-        const dqReason = qualified ? null : disqualifyReasonFor(surveyData)
-        const eventId = `lead-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
-        const payload = {
-          ...surveyData,
-          ...trackingRef.current,
-          source: process.env.NEXT_PUBLIC_LEAD_SOURCE || `${brand.companyName} - Survey`,
-          submittedAt: new Date().toISOString(),
-          qualified,
-          lead_score: score,
-          lead_quality: quality,
-          disqualify_reason: dqReason,
-          meta_event_id: eventId,
-          meta_event_name: qualified ? 'Lead' : 'LeadLowIntent',
-          meta_value: qualified ? score * 25 : 0,
-        }
-        // Fire weighted Meta Pixel event (browser-side; CAPI is a separate later phase)
-        if (typeof window !== 'undefined' && (window as { fbq?: (...args: unknown[]) => void }).fbq) {
-          const fbq = (window as { fbq: (...args: unknown[]) => void }).fbq
-          if (qualified) {
-            fbq('track', 'Lead', {
-              value: score * 25, currency: 'USD',
-              content_name: `${brand.companyName} Survey`, content_category: 'real_estate',
-              lead_score: score, lead_quality: quality,
-            }, { eventID: eventId })
-          } else {
-            fbq('trackCustom', 'LeadLowIntent', {
-              content_name: `${brand.companyName} Survey`, content_category: 'real_estate',
-              disqualify_reason: dqReason, lead_score: score,
-            }, { eventID: eventId })
-          }
-        }
-        const res = await fetch('/api/submit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (!res.ok) {
-          console.error('Submit failed:', res.status, await res.text())
-        }
-      } catch (e) {
-        console.error('Submit error:', e)
-      }
-
-      // Persist lead data for thank-you page book offer
-      try {
-        sessionStorage.setItem('leadData', JSON.stringify({
-          firstName: surveyData.firstName,
-          lastName: surveyData.lastName,
-          email: surveyData.email,
-          phone: surveyData.phone,
-          address: surveyData.address,
-          city: surveyData.city,
-          state: surveyData.state,
-          zip: surveyData.zip,
-        }))
-        // Bridge the property condition to the thank-you page so its Lead
-        // pixel fire can suppress excellent / move-in-ready leads.
-        sessionStorage.setItem('lead_condition', surveyData.condition)
-      } catch {}
-
-      window.location.href = '/thank-you'
+      await runFinalSubmit(process.env.NEXT_PUBLIC_LEAD_SOURCE || `${brand.companyName} - Survey`)
     } else if (step < totalSteps) {
       setStep(step + 1)
     }
@@ -373,6 +455,11 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
       return
     }
 
+    // Two-step: the final qualifying step (reason, step 8) submits instead of advancing to contact.
+    if (twoStep && phase === 2 && step === 8) {
+      setTimeout(() => { runFinalSubmit('qualifying-details') }, 300)
+      return
+    }
     setTimeout(() => { if (step < totalSteps) setStep(step + 1) }, 300)
   }
 
@@ -381,6 +468,13 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
     const city = details.city || ""
     const zip = details.zip || ""
     setSurveyData({ ...surveyData, address, city, state, zip })
+
+    // Two-step phase 1: no disqualifiers — capture the address and move to the contact step.
+    if (twoStep) {
+      setAddressVerified(true)
+      setTimeout(() => { setStep(9) }, 300)
+      return
+    }
 
     // Env-driven service-area gate. Permissive when NEXT_PUBLIC_SERVICE_AREAS is
     // empty (accepts any address). addressVerified only flips true after passing.
@@ -730,8 +824,8 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
               </span>
             ) : (
               <>
-                {step === totalSteps ? "Get My Cash Offer" : "Continue"}
-                {step !== totalSteps && <ArrowRight className="ml-2 h-5 w-5" />}
+                {((twoStep && phase === 2 && step === 8) || (!twoStep && step === totalSteps)) ? "Get My Cash Offer" : "Continue"}
+                {!((twoStep && phase === 2 && step === 8) || (!twoStep && step === totalSteps)) && <ArrowRight className="ml-2 h-5 w-5" />}
               </>
             )}
           </Button>
