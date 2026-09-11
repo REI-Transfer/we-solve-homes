@@ -455,11 +455,9 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
       return
     }
 
-    // Two-step: the final qualifying step (reason, step 8) submits instead of advancing to contact.
-    if (twoStep && phase === 2 && step === 8) {
-      setTimeout(() => { runFinalSubmit('qualifying-details') }, 300)
-      return
-    }
+    // Two-step: on the last qualifying step (reason, step 8) just record the answer and STOP —
+    // the final submit stays behind the "Get My Cash Offer" button (no auto-submit).
+    if (twoStep && phase === 2 && step === 8) { return }
     setTimeout(() => { if (step < totalSteps) setStep(step + 1) }, 300)
   }
 
@@ -467,7 +465,9 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
     const state = details.state?.toUpperCase() || ""
     const city = details.city || ""
     const zip = details.zip || ""
-    setSurveyData({ ...surveyData, address, city, state, zip })
+    // Functional update: keep the parsed components even if the autocomplete's onChange fires
+    // afterwards with a stale closure (it would otherwise reset city/state/zip to "").
+    setSurveyData((prev) => ({ ...prev, address, city, state, zip }))
 
     // Two-step phase 1: no disqualifiers — capture the address and move to the contact step.
     if (twoStep) {
@@ -599,6 +599,11 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
     )
   }
 
+  // Progress counter/dots. Single-flow: Step N of 9. Two-step: phase 1 = 2 steps
+  // (address=1, contact=2); phase 2 = qualifying steps renumbered 1..7 of 7.
+  const displayTotal = twoStep ? (phase === 1 ? 2 : 7) : totalSteps
+  const displayStep = twoStep ? (phase === 1 ? (step === 1 ? 1 : 2) : step - 1) : step
+
   return (
     <div className="w-full max-w-2xl rounded-2xl border border-[#E2E8F0] bg-white p-4 md:p-6 shadow-lg">
       <div className="flex flex-col gap-3 md:gap-5">
@@ -606,14 +611,14 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Home className="h-5 w-5 text-[#1B2A4A]" />
-            <span className="text-base text-[#5A6B7D]">Step {step} of {totalSteps}</span>
+            <span className="text-base text-[#5A6B7D]">Step {displayStep} of {displayTotal}</span>
           </div>
           <div className="flex gap-1">
-            {Array.from({ length: totalSteps }).map((_, i) => (
+            {Array.from({ length: displayTotal }).map((_, i) => (
               <div
                 key={i}
                 className={`h-1.5 w-6 rounded-full transition-colors ${
-                  i < step ? "bg-[#1B2A4A]" : "bg-gray-200"
+                  i < displayStep ? "bg-[#1B2A4A]" : "bg-gray-200"
                 }`}
               />
             ))}
@@ -632,7 +637,7 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
             </div>
             <AddressAutocomplete
               value={surveyData.address}
-              onChange={(address) => { setSurveyData({ ...surveyData, address }); setAddressVerified(false) }}
+              onChange={(address) => { setSurveyData((prev) => ({ ...prev, address })); setAddressVerified(false) }}
               onSelect={handleAddressSelect}
               placeholder="Start typing your address..."
             />
