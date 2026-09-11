@@ -189,6 +189,18 @@ function validateName(name: string): { valid: boolean; msg: string } {
   return { valid: true, msg: "" }
 }
 
+// Fallback parser: pull city/state/zip out of a US formatted address string
+// (e.g. "4801 Main St, Kansas City, MO 64112, USA") for the cases where Google's
+// place result doesn't include structured address_components. Only fills a field
+// that isn't already provided.
+function deriveAddressParts(formatted: string): { city: string; state: string; zip: string } {
+  const out = { city: "", state: "", zip: "" }
+  if (!formatted) return out
+  const m = formatted.match(/([A-Za-z .'\-]+),\s*([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\b/)
+  if (m) { out.city = m[1].trim(); out.state = m[2].toUpperCase(); out.zip = m[3] }
+  return out
+}
+
 interface SurveyCardProps {
   initialAddress?: string
   brand: Brand
@@ -353,10 +365,17 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
     if (honeypot) { setIsSubmitted(true); return }
 
     setIsSubmitting(true)
+    // Guarantee the basic-capture POST carries parsed address components even if Google didn't
+    // return structured ones (the handler upsert relies on city/state/zip).
+    const parts = deriveAddressParts(surveyData.address)
+    const city = surveyData.city || parts.city
+    const state = surveyData.state || parts.state
+    const zip = surveyData.zip || parts.zip
     try {
       const payload = {
         ...surveyData,
         ...trackingRef.current,
+        city, state, zip,
         source: 'basic-capture',
         submittedAt: new Date().toISOString(),
       }
@@ -370,10 +389,14 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
     }
     try {
       localStorage.setItem(TWO_STEP_KEY, JSON.stringify({ basicPosted: true, fields: {
-        address: surveyData.address, city: surveyData.city, state: surveyData.state, zip: surveyData.zip,
+        address: surveyData.address, city, state, zip,
         firstName: surveyData.firstName, lastName: surveyData.lastName, email: surveyData.email, phone: surveyData.phone,
       }}))
     } catch {}
+    // Reflect the derived components back into state so phase 2 / final submit keep them.
+    if (city !== surveyData.city || state !== surveyData.state || zip !== surveyData.zip) {
+      setSurveyData((prev) => ({ ...prev, city, state, zip }))
+    }
     setIsSubmitting(false)
     setPhase(2)
     setStep(2)
@@ -462,9 +485,12 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
   }
 
   const handleAddressSelect = (address: string, details: AddressDetails) => {
-    const state = details.state?.toUpperCase() || ""
-    const city = details.city || ""
-    const zip = details.zip || ""
+    // Prefer Google's structured components; fall back to parsing the formatted address string
+    // when they're missing (Google occasionally returns a place without address_components).
+    const parts = deriveAddressParts(address)
+    const state = (details.state || parts.state || "").toUpperCase()
+    const city = details.city || parts.city || ""
+    const zip = details.zip || parts.zip || ""
     // Functional update: keep the parsed components even if the autocomplete's onChange fires
     // afterwards with a stale closure (it would otherwise reset city/state/zip to "").
     setSurveyData((prev) => ({ ...prev, address, city, state, zip }))
