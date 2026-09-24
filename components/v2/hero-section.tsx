@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, ArrowDown, Shield, Clock, DollarSign } from "lucide-react";
+import { ArrowRight, ArrowDown, Shield, ShieldCheck, MapPin, Clock, DollarSign } from "lucide-react";
 import { SurveyCard } from "@/components/v2/survey-card";
 import { AddressAutocomplete, type AddressDetails } from "@/components/survey/address-autocomplete";
 import { isWithinServiceArea } from "@/lib/service-area";
@@ -114,9 +114,29 @@ export function HeroSection({ brand }: { brand: Brand }) {
                 <p className="hidden md:block text-center text-[#94A3B8] text-sm">
                   Takes less than 2 minutes. No obligation.
                 </p>
-                {/* The template's BBB "A+ Accredited" and Google 5-star badges were removed: they were
-                    hard-coded for every client, and We Solve Homes has no BBB listing. Add them back only
-                    once the client's real accreditation and review score can be shown. */}
+                {/* Our own promise badges. These replaced the template's BBB "A+ Accredited" and Google
+                    5-star badges, which were hard-coded for every client (We Solve Homes has no BBB
+                    listing). Each badge restates a promise this page already makes, never a third-party
+                    rating we cannot show. */}
+                <div className="grid grid-cols-3 gap-2 md:gap-4 mt-2 md:mt-3">
+                  {[
+                    { Icon: ShieldCheck, top: "Offer Never", bottom: "Changes" },
+                    { Icon: MapPin, top: "Local", bottom: brand.marketName ? `${brand.marketName} Buyer` : "Cash Buyer" },
+                    { Icon: DollarSign, top: "$0 Fees or", bottom: "Commissions" },
+                  ].map(({ Icon, top, bottom }) => (
+                    <div
+                      key={top}
+                      className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-white px-2 py-2.5 md:py-4 text-center shadow-sm"
+                    >
+                      <Icon className="h-6 w-6 md:h-8 md:w-8 text-[color:var(--brand-accent)]" aria-hidden="true" />
+                      <span className="text-xs md:text-base font-bold leading-tight text-[#0F1D2F]">
+                        {top}
+                        <br />
+                        {bottom}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="animate-scale-in">
