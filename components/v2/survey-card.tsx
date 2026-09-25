@@ -5,7 +5,7 @@ import { Home, ArrowRight, ArrowLeft, ArrowDown, Check, XCircle } from "lucide-r
 import { Button } from "@/components/ui/button"
 import { captureTrackingData, getIPAddress } from "@/lib/tracking"
 import { Input } from "@/components/ui/input"
-import { AddressAutocomplete, type AddressDetails } from "@/components/survey/address-autocomplete"
+import { AddressAutocomplete, type AddressAutocompleteHandle, type AddressDetails } from "@/components/survey/address-autocomplete"
 import { isWithinServiceArea } from "@/lib/service-area"
 import { marketPhrase, type Brand } from "@/lib/brand"
 
@@ -203,16 +203,18 @@ function deriveAddressParts(formatted: string): { city: string; state: string; z
 
 interface SurveyCardProps {
   initialAddress?: string
+  // Google details for initialAddress, so city / state / ZIP reach the lead.
+  initialDetails?: AddressDetails
   brand: Brand
 }
 
-export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
+export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCardProps) {
   const [step, setStep] = useState(initialAddress ? 2 : 1)
   const [surveyData, setSurveyData] = useState<SurveyData>({
     address: initialAddress || "",
-    city: "",
-    state: "",
-    zip: "",
+    city: initialDetails?.city || "",
+    state: initialDetails?.state?.toUpperCase() || "",
+    zip: initialDetails?.zip || "",
     propertyType: "",
     isLegalOwner: "",
     ownershipLength: "",
@@ -434,6 +436,13 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
     if (step > 1) setStep(step - 1)
   }
 
+  const addressRef = useRef<AddressAutocompleteHandle>(null)
+  // Typed but not picked from the list: look it up and run handleAddressSelect.
+  const handleAddressContinue = () => {
+    if (canProceed()) void handleNext()
+    else void addressRef.current?.resolveTyped()
+  }
+
   const canProceed = () => {
     switch (step) {
       case 1: return surveyData.address.trim().length > 0 && addressVerified
@@ -564,7 +573,7 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
       shortOwnership: {
         title: "This May Not Be the Right Fit",
         message: "Based on your answers, we may not be the best fit for your situation right now.",
-        detail: "We work best with homeowners who've owned their property a bit longer. If your situation changes, feel free to come back any time — we'd be glad to help.",
+        detail: "We work best with homeowners who've owned their property a bit longer. If your situation changes, feel free to come back any time. We'd be glad to help.",
       },
       outsideArea: {
         title: "We Don't Service That Area Yet",
@@ -662,14 +671,16 @@ export function SurveyCard({ initialAddress, brand }: SurveyCardProps) {
               <ArrowDown className="h-6 w-6 text-[#1B2A4A] animate-bounce" />
             </div>
             <AddressAutocomplete
+              ref={addressRef}
+              onSubmit={handleAddressContinue}
               value={surveyData.address}
               onChange={(address) => { setSurveyData((prev) => ({ ...prev, address })); setAddressVerified(false) }}
               onSelect={handleAddressSelect}
               placeholder="Start typing your address..."
             />
             <Button
-              onClick={handleNext}
-              disabled={!canProceed()}
+              onClick={handleAddressContinue}
+              disabled={!surveyData.address.trim()}
               className="w-full h-14 bg-[#1B2A4A] text-white text-lg font-semibold rounded-xl hover:bg-[#131E36] disabled:opacity-40 transition-all shadow-md hover:shadow-lg"
             >
               Get My Cash Offer
