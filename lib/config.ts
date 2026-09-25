@@ -22,7 +22,7 @@ const config = {
   foundersCaption:  process.env.FOUNDERS_CAPTION  ?? "",
   headline:        process.env.HEADLINE         ?? "Sell Your House Fast For Cash",
   headlineAccent:  process.env.HEADLINE_ACCENT  ?? "",
-  subheadline:     process.env.SUBHEADLINE      ?? "No repairs. No fees. A fair cash offer in 24 hours — you pick the closing date.",
+  subheadline:     process.env.SUBHEADLINE      ?? "No repairs. No fees. A fair cash offer in 24 hours. You pick the closing date.",
   marketName:      process.env.MARKET_NAME      ?? "",
   smsKeyword:      process.env.SMS_KEYWORD      ?? "OFFER",
   serviceAreas:    process.env.SERVICE_AREAS    ?? "[]",
