@@ -89,6 +89,7 @@ const REASON_OPTIONS = [
 const SCORE_TIMELINE: Record<string, number> = {
   'asap': 3, '2-weeks': 2, '30-days': 1, '60-days': 0, 'flexible': 0,
 }
+const TIMELINE_NEUTRAL = 1
 const SCORE_OWNERSHIP: Record<string, number> = {
   '10-plus-years': 3, '5-10-years': 1, '3-5-years': 0, '1-3-years': 0,
   // inherited: exempt from the ownership hard-DQ; scored 3 (matches Elevate v2.51).
@@ -105,7 +106,7 @@ const SCORE_CONDITION: Record<string, number> = {
   'fair': 0, 'good': 0, 'excellent': 0,
 }
 function calculateLeadScore(d: SurveyData): number {
-  const t = SCORE_TIMELINE[d.timeline] ?? 0
+  const t = d.timeline ? (SCORE_TIMELINE[d.timeline] ?? 0) : TIMELINE_NEUTRAL
   const o = SCORE_OWNERSHIP[d.ownershipLength] ?? 0
   const r = SCORE_REASON[d.reason] ?? 0
   const c = SCORE_CONDITION[d.condition] ?? 0
@@ -259,18 +260,18 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
         if (d.basicPosted) { setPhase(2); setAddressVerified(true); setStep(2) }
       } else if (initialAddress) {
         // hero prefilled the address: go straight to the phase-1 contact step
-        setAddressVerified(true); setStep(9)
+        setAddressVerified(true); setStep(8)
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const totalSteps = 9
+  const totalSteps = 8
 
   // Final submit (fires the Meta Lead pixel + posts the full lead). Called by the single-flow
-  // step-9 path (source = configured LEAD_SOURCE) and, in two-step mode, after the last
+  // step-8 path (source = configured LEAD_SOURCE) and, in two-step mode, after the last
   // qualifying step (source = "qualifying-details"). Behaviour is identical to the original
-  // step-9 block; only `source` varies.
+  // step-8 block; only `source` varies.
   const runFinalSubmit = async (source: string) => {
     if (isSubmitting) return
     const timeSpent = Date.now() - formStartTime.current
@@ -407,10 +408,10 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
   const handleNext = async () => {
     // Two-step: address step routes to the contact step; phase-1 contact posts basic-capture;
     // the last qualifying step submits the final lead.
-    if (twoStep && phase === 1 && step === 1 && addressVerified) { setStep(9); return }
-    if (twoStep && phase === 1 && step === 9) { await submitBasic(); return }
-    if (twoStep && phase === 2 && step === 8) { await runFinalSubmit('qualifying-details'); return }
-    if (step === 9) {
+    if (twoStep && phase === 1 && step === 1 && addressVerified) { setStep(8); return }
+    if (twoStep && phase === 1 && step === 8) { await submitBasic(); return }
+    if (twoStep && phase === 2 && step === 7) { await runFinalSubmit('qualifying-details'); return }
+    if (step === 8) {
       const errors: {[key: string]: string} = {}
       const firstNameCheck = validateName(surveyData.firstName)
       if (!firstNameCheck.valid) errors.firstName = firstNameCheck.msg
@@ -450,10 +451,9 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
       case 3: return surveyData.isLegalOwner !== ""
       case 4: return surveyData.ownershipLength !== ""
       case 5: return surveyData.listedOnMarket !== ""
-      case 6: return surveyData.timeline !== ""
-      case 7: return surveyData.condition !== ""
-      case 8: return surveyData.reason !== ""
-      case 9: return surveyData.firstName.trim().length > 0 && surveyData.lastName.trim().length > 0 && surveyData.email.trim().length > 0 && surveyData.phone.trim().length > 0
+      case 6: return surveyData.condition !== ""
+      case 7: return surveyData.reason !== ""
+      case 8: return surveyData.firstName.trim().length > 0 && surveyData.lastName.trim().length > 0 && surveyData.email.trim().length > 0 && surveyData.phone.trim().length > 0
       default: return false
     }
   }
@@ -487,9 +487,9 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
       return
     }
 
-    // Two-step: on the last qualifying step (reason, step 8) just record the answer and STOP —
+    // Two-step: on the last qualifying step (reason, step 7) just record the answer and STOP —
     // the final submit stays behind the "Get My Cash Offer" button (no auto-submit).
-    if (twoStep && phase === 2 && step === 8) { return }
+    if (twoStep && phase === 2 && step === 7) { return }
     setTimeout(() => { if (step < totalSteps) setStep(step + 1) }, 300)
   }
 
@@ -507,7 +507,7 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
     // Two-step phase 1: no disqualifiers — capture the address and move to the contact step.
     if (twoStep) {
       setAddressVerified(true)
-      setTimeout(() => { setStep(9) }, 300)
+      setTimeout(() => { setStep(8) }, 300)
       return
     }
 
@@ -634,9 +634,9 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
     )
   }
 
-  // Progress counter/dots. Single-flow: Step N of 9. Two-step: phase 1 = 2 steps
-  // (address=1, contact=2); phase 2 = qualifying steps renumbered 1..7 of 7.
-  const displayTotal = twoStep ? (phase === 1 ? 2 : 7) : totalSteps
+  // Progress counter/dots. Single-flow: Step N of 8. Two-step: phase 1 = 2 steps
+  // (address=1, contact=2); phase 2 = qualifying steps renumbered 1..6 of 6.
+  const displayTotal = twoStep ? (phase === 1 ? 2 : 6) : totalSteps
   const displayStep = twoStep ? (phase === 1 ? (step === 1 ? 1 : 2) : step - 1) : step
 
   return (
@@ -741,21 +741,8 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
           </div>
         )}
 
-        {/* Step 6: Timeline */}
+        {/* Step 6: Condition */}
         {step === 6 && (
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2 className="text-xl md:text-2xl font-semibold text-[#0F1D2F]">How fast are you looking to sell?</h2>
-              <p className="mt-1 text-base text-[#5A6B7D]">Select your ideal timeline for closing.</p>
-            </div>
-            <div className="flex flex-col gap-2">
-              {TIMELINE_OPTIONS.map((option) => renderOptionButton(option, surveyData.timeline, "timeline"))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 7: Condition */}
-        {step === 7 && (
           <div className="flex flex-col gap-4">
             <div>
               <h2 className="text-xl md:text-2xl font-semibold text-[#0F1D2F]">What condition is the property in?</h2>
@@ -767,8 +754,8 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
           </div>
         )}
 
-        {/* Step 8: Reason */}
-        {step === 8 && (
+        {/* Step 7: Reason */}
+        {step === 7 && (
           <div className="flex flex-col gap-4">
             <div>
               <h2 className="text-xl md:text-2xl font-semibold text-[#0F1D2F]">What&apos;s your reason for selling?</h2>
@@ -780,8 +767,8 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
           </div>
         )}
 
-        {/* Step 9: Contact Information */}
-        {step === 9 && (
+        {/* Step 8: Contact Information */}
+        {step === 8 && (
           <div className="flex flex-col gap-4">
             <div>
               <h2 className="text-xl md:text-2xl font-semibold text-[#0F1D2F]">Almost done. How can we reach you?</h2>
@@ -866,8 +853,8 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
               </span>
             ) : (
               <>
-                {((twoStep && phase === 2 && step === 8) || (!twoStep && step === totalSteps)) ? "Get My Cash Offer" : "Continue"}
-                {!((twoStep && phase === 2 && step === 8) || (!twoStep && step === totalSteps)) && <ArrowRight className="ml-2 h-5 w-5" />}
+                {((twoStep && phase === 2 && step === 7) || (!twoStep && step === totalSteps)) ? "Get My Cash Offer" : "Continue"}
+                {!((twoStep && phase === 2 && step === 7) || (!twoStep && step === totalSteps)) && <ArrowRight className="ml-2 h-5 w-5" />}
               </>
             )}
           </Button>
