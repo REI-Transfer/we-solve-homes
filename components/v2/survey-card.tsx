@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { AddressAutocomplete, type AddressAutocompleteHandle, type AddressDetails } from "@/components/survey/address-autocomplete"
 import { isWithinServiceArea } from "@/lib/service-area"
 import { marketPhrase, type Brand } from "@/lib/brand"
+import { RecordSurveyCard } from "@/components/v2/record-survey-card"
 
 interface SurveyData {
   address: string
@@ -202,14 +203,14 @@ function deriveAddressParts(formatted: string): { city: string; state: string; z
   return out
 }
 
-interface SurveyCardProps {
+export interface SurveyCardProps {
   initialAddress?: string
   // Google details for initialAddress, so city / state / ZIP reach the lead.
   initialDetails?: AddressDetails
   brand: Brand
 }
 
-export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCardProps) {
+function CurrentSurveyCard({ initialAddress, initialDetails, brand }: SurveyCardProps) {
   const [step, setStep] = useState(initialAddress ? 2 : 1)
   const [surveyData, setSurveyData] = useState<SurveyData>({
     address: initialAddress || "",
@@ -863,4 +864,11 @@ export function SurveyCard({ initialAddress, initialDetails, brand }: SurveyCard
       </div>
     </div>
   )
+}
+
+// NEXT_PUBLIC_RECORD_FORM=one-step|two-step: the property-record form (record-survey-card.tsx).
+// Unset = this site's current form above, untouched (unset + redeploy = rollback).
+export function SurveyCard(props: SurveyCardProps) {
+  if (props.brand.recordForm) return <RecordSurveyCard {...props} mode={props.brand.recordMode} />
+  return <CurrentSurveyCard {...props} />
 }
